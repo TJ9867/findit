@@ -1,0 +1,27 @@
+[package]
+name = "findit"
+version = "0.1.0"
+authors = ["hexstd <hexstd@protonmail.com>"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.72"
+publish = false
+
+
+[dependencies]
+eframe ="0.28.1"
+egui = "0.28.1"
+egui-file-dialog = "0.6.0"
+egui_extras = "0.28.1"
+regex = "1.10.3"
+walkdir = "2"
+memmap2 =  "0.9.4"
+evalexpr = "11.3.0"
+work-queue = "0.1.4"
+concurrent-queue = "2.5.0"
+
+env_logger = { version = "0.10", default-features = false, features = [
+    "auto-color",
+    "humantime",
+] }
+
