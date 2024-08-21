@@ -368,11 +368,6 @@ impl FinditApp {
     }
 
     fn add_advanced_view_options(&mut self, ui: &mut egui::Ui) {
-        // TODO add file size limit
-        // TODO memory of past searches (maybe needs a size limit).
-        // TODO copy value (offset, line no(s), content)
-        // TODO sort/organize by: filetype (magic), extension, size
-
         ui.collapsing("Advanced Search", |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(
@@ -386,18 +381,7 @@ impl FinditApp {
                     "No Hidden Files",
                 );
             });
-            // ui.horizontal(|ui| {
-            //     ui.selectable_value(
-            //         &mut self.file_walk_options.links,
-            //         LinkBehaviorEnum::Follow,
-            //         "Follow Links",
-            //     );
-            //     ui.selectable_value(
-            //         &mut self.file_walk_options.links,
-            //         LinkBehaviorEnum::NoFollow,
-            //         "No Follow Links",
-            //     );
-            // });
+
             ui.horizontal(|ui| {
                 let _max_hits_label =
                     ui.label(RichText::new("Max Hits (per File): ").text_style(TextStyle::Small));
@@ -506,15 +490,9 @@ impl FinditApp {
     }
 
     fn add_listing_and_content_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // Table results
-        // TODO columns
-        // Path, attributes, file size, matches
-
-        // update the current list of findings
-
         for rx in self.rx_handles.iter() {
             for item in rx.try_iter() {
-                self.findings.push(item); // TODO maybe make a set of filepaths and then dropdowns with smaller tables for each
+                self.findings.push(item);
             }
         }
 
@@ -525,7 +503,6 @@ impl FinditApp {
             }
         }
 
-        // build the table
         TableBuilder::new(ui)
             .striped(true)
             .auto_shrink(true)
@@ -761,6 +738,32 @@ impl FinditApp {
         }
     }
 
+    fn enqueue_files<P: core::ops::FnMut(&DirEntry) -> bool>(
+        &mut self,
+        file_iter: FilterEntry<walkdir::IntoIter, P>,
+    ) -> FileCount {
+        let mut file_count = 0;
+        let mut dir_count = 0;
+
+        for entry in file_iter {
+            if entry.is_ok() {
+                if let Some(ent) = entry.as_ref().ok() {
+                    if ent.file_type().is_file() {
+                        file_count += 1;
+                        self.file_queue.push(ent.clone()).unwrap();
+                    } else if ent.file_type().is_dir() {
+                        dir_count += 1;
+                    }
+                }
+            }
+        }
+
+        FileCount {
+            num_files: file_count,
+            num_dirs: dir_count,
+        }
+    }
+
     fn search(&mut self) {
         self.max_files = 0;
         self.current_files_mtx = Arc::new(Mutex::new(0));
@@ -776,7 +779,7 @@ impl FinditApp {
             self.root_folder_path.to_str().unwrap()
         );
 
-        let count_struct = count_files(filtered_iter);
+        let count_struct = self.enqueue_files(filtered_iter);
 
         self.max_files = /*count_struct.num_dirs +*/ count_struct.num_files;
         println!(
@@ -807,11 +810,7 @@ impl FinditApp {
         let search_threads = 10;
 
         let queue: Queue<Task> = Queue::new(search_threads, 4096);
-        for filter_entry in filtered_iter {
-            if let Ok(ent) = filter_entry {
-                self.file_queue.push(ent).unwrap();
-            }
-        }
+
         for _i in 0..count_struct.num_files {
             let search_opts_ref = Arc::clone(&search_opts);
             let file_entry_q = Arc::clone(&self.file_queue);
@@ -1005,28 +1004,4 @@ fn is_hidden(entry: &DirEntry) -> bool {
         .to_str()
         .map(|s| s.starts_with("."))
         .unwrap_or(false)
-}
-
-fn count_files<P: core::ops::FnMut(&DirEntry) -> bool>(
-    file_iter: FilterEntry<walkdir::IntoIter, P>,
-) -> FileCount {
-    let mut file_count = 0;
-    let mut dir_count = 0;
-
-    for entry in file_iter {
-        if entry.is_ok() {
-            if let Some(ent) = entry.as_ref().ok() {
-                if ent.file_type().is_file() {
-                    file_count += 1;
-                } else if ent.file_type().is_dir() {
-                    dir_count += 1;
-                }
-            }
-        }
-    }
-
-    FileCount {
-        num_files: file_count,
-        num_dirs: dir_count,
-    }
 }
