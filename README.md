@@ -10,6 +10,8 @@ cd findit
 cargo run
 ```
 
+![main findit GUI](https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/main_gui.png)
+
 ## Explanation
 A simple cross-platform application to help you find/keep track of binary and text in a non-trivial number of files.
 
