@@ -71,7 +71,7 @@ fn configure_text_styles(cc: &eframe::CreationContext<'_>) {
 
 fn load_icon() -> IconData {
     let (icon_rgba, icon_width, icon_height) = {
-        let icon = include_bytes!("../rsrc/icon/findit-icon-128x128.png");
+        let icon = include_bytes!("../rsrc/icon/quer-icon-128x128.png");
         let image = image::load_from_memory(icon)
             .expect("Failed to open icon path")
             .into_rgba8();
@@ -97,9 +97,9 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "findit - Stuff Finder",
+        "quer - Stuff Finder",
         options,
-        Box::new(|cc| Ok(Box::new(FinditApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(QuerApp::new(cc)))),
     )
 }
 
@@ -144,7 +144,7 @@ enum RegexErr {
     EmptyRegex,
 }
 
-struct FinditApp {
+struct QuerApp {
     regex_str: String,
     filter_str: String,
     root_folder_path: PathBuf,
@@ -172,7 +172,7 @@ struct SearchOptions {
     max_hits: u32,
 }
 
-impl Clone for FinditApp {
+impl Clone for QuerApp {
     fn clone(&self) -> Self {
         Self {
             regex_str: self.regex_str.clone(),
@@ -198,7 +198,7 @@ impl Clone for FinditApp {
     }
 }
 
-impl eframe::App for FinditApp {
+impl eframe::App for QuerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.update_main_search_ui(ui, ctx);
@@ -206,7 +206,7 @@ impl eframe::App for FinditApp {
     }
 }
 
-impl FinditApp {
+impl QuerApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_text_styles(&cc);
         Self {
@@ -616,7 +616,7 @@ impl FinditApp {
 
     fn add_find_and_clear_btns(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         ui.horizontal(|ui| {
-            let mut btn = egui::Button::new(RichText::new("FindIt").text_style(TextStyle::Heading));
+            let mut btn = egui::Button::new(RichText::new("Search").text_style(TextStyle::Heading));
             let enable_btn;
             let is_find_btn;
             match &self.regex_result {

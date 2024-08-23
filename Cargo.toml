@@ -1,5 +1,5 @@
 [package]
-name = "findit"
+name = "quer"
 version = "0.1.0"
 authors = ["hexstd <hexstd@protonmail.com>"]
 license = "MIT"
