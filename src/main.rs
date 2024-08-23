@@ -2,7 +2,7 @@
 
 use concurrent_queue::ConcurrentQueue;
 use eframe::egui;
-use egui::{FontFamily, FontId, RichText, TextStyle}; // FontFamily, FontId,
+use egui::{FontFamily, FontId, IconData, RichText, TextStyle}; // FontFamily, FontId,
 use egui_extras::{Column, TableBuilder};
 use egui_file_dialog::{DialogState, FileDialog};
 use memmap2::Mmap;
@@ -69,12 +69,33 @@ fn configure_text_styles(cc: &eframe::CreationContext<'_>) {
     ctx.set_style(style);
 }
 
+fn load_icon() -> IconData {
+    let (icon_rgba, icon_width, icon_height) = {
+        let icon = include_bytes!("../rsrc/icon/findit-icon-128x128.png");
+        let image = image::load_from_memory(icon)
+            .expect("Failed to open icon path")
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        let rgba = image.into_raw();
+        (rgba, width, height)
+    };
+
+    IconData {
+        rgba: icon_rgba,
+        width: icon_width,
+        height: icon_height,
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+
+    let viewport_bldr = egui::ViewportBuilder::default().with_icon(load_icon());
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default(),
+        viewport: viewport_bldr,
         ..Default::default()
     };
+
     eframe::run_native(
         "findit - Stuff Finder",
         options,
@@ -801,14 +822,8 @@ impl FinditApp {
 
         self.filecount_handles.push(filecount_rx);
 
-        let filtered_iter = create_filter_iter(
-            WalkDir::new(&self.root_folder_path),
-            self.file_walk_options.clone(),
-        );
         let search_opts = Arc::new(self.get_search_options());
-
         let search_threads = 10;
-
         let queue: Queue<Task> = Queue::new(search_threads, 4096);
 
         for _i in 0..count_struct.num_files {

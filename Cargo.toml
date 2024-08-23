@@ -19,6 +19,7 @@ memmap2 =  "0.9.4"
 evalexpr = "11.3.0"
 work-queue = "0.1.4"
 concurrent-queue = "2.5.0"
+image = "0.25.2"
 
 env_logger = { version = "0.10", default-features = false, features = [
     "auto-color",
