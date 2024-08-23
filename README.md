@@ -1,5 +1,5 @@
-# findit
-<img src="https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/icon/findit-icon-512x512.png"
+# quer
+<img src="https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/icon/quer-icon-512x512.png"
      style="display:block;float:none;margin-left:auto;margin-right:auto;width:50%">
 
 
@@ -8,15 +8,15 @@ A super simple `egui` utility application written in Rust.
 ## Usage
 On your favored platform:
 ```bash
-git clone https://github.com/TJ9867/findit.git
-cd findit
+git clone https://github.com/TJ9867/quer.git
+cd quer
 cargo run
 ```
 
-![main findit GUI](https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/main_gui.png)
+![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/main_gui.png)
 ---
 ## Demo
-![main findit GUI](https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/example_usage.gif)
+![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/example_usage.gif)
 ---
 
 ## Explanation
