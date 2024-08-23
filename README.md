@@ -1,5 +1,5 @@
 # findit
-<img src="https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/icon/findit-icon-1024x1024.png"
+<img src="https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/icon/findit-icon-512x512.png"
      style="display:block;float:none;margin-left:auto;margin-right:auto;width:50%">
 
 
