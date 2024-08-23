@@ -1,6 +1,8 @@
 # findit
-<img src="https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/icon/findit-icon-128x128.png"
-     style="display:block;float:none;margin-left:auto;margin-right:auto;width:60%">
+<img src="https://raw.githubusercontent.com/TJ9867/findit/main/rsrc/icon/findit-icon-1024x1024.png"
+     style="display:block;float:none;margin-left:auto;margin-right:auto;width:50%">
+
+
 A super simple `egui` utility application written in Rust.
 
 ## Usage
