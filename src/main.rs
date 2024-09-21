@@ -164,6 +164,7 @@ struct QuerApp {
     filecount_handles: Vec<mpsc::Receiver<i32>>,
     file_queue: Arc<ConcurrentQueue<DirEntry>>,
     work_queue: Option<Queue<Task>>,
+    table_context_menu_open: bool,
 }
 
 struct SearchOptions {
@@ -194,15 +195,14 @@ impl Clone for QuerApp {
             filecount_handles: Vec::new(),
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
+            table_context_menu_open: false,
         }
     }
 }
 
 impl eframe::App for QuerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.update_main_search_ui(ui, ctx);
-        });
+        self.update_main_search_ui(ctx);
     }
 }
 
@@ -232,6 +232,7 @@ impl QuerApp {
             filecount_handles: Vec::new(),
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
+            table_context_menu_open: false,
         }
     }
 
@@ -450,11 +451,11 @@ impl QuerApp {
         resp.clone().on_hover_text(hover_text);
     }
 
-    fn bytes_to_hexdump(&self, array: &[u8], size: usize) -> String {
+    fn bytes_to_hexdump(&self, array: &[u8]) -> String {
         let div_16 = array.len() as f32 / 16_f32;
         let mut hexdump = String::with_capacity(div_16.ceil() as usize * 65);
         let mut ascii_dump = String::with_capacity(16);
-        for (pos, byte) in array.iter().enumerate().take(size) {
+        for (pos, byte) in array.iter().enumerate().take(array.len()) {
             hexdump.push_str(&format!("{byte:02X} "));
 
             if byte.is_ascii() && !byte.is_ascii_whitespace() && !byte.eq(&0) {
@@ -474,40 +475,112 @@ impl QuerApp {
         return hexdump;
     }
 
+    fn bytes_to_hex(&self, array: &[u8], size: usize) -> String {
+        let mut hexdump = String::with_capacity(size * 2);
+        for (_pos, byte) in array.iter().enumerate().take(size) {
+            hexdump.push_str(&format!("{byte:02X}"));
+        }
+
+        return hexdump;
+    }
+
+    fn cap_string_length(&self, input: &str, max_length: usize) -> String {
+        if max_length == 0 {
+            String::new() // Return an empty string if max_length is 0
+        } else {
+            input.chars().take(max_length).collect()
+        }
+    }
+
+    fn get_file_contents(
+        &self,
+        path: &String,
+        offset: usize,
+        match_length: usize,
+    ) -> Option<Vec<u8>> {
+        let file_r = File::open(path);
+        let mut preview_buff = vec![0; match_length]; // todo make this dynamic and nicer
+        match file_r {
+            Ok(mut file) => {
+                match file.seek(SeekFrom::Start(offset as u64)) {
+                    Ok(_) => match file.read(&mut preview_buff) {
+                        Ok(_size) => return Some(preview_buff),
+                        Err(_e) => {}
+                    },
+                    Err(_e) => {} // do nothing
+                }
+            }
+            Err(_e) => {} // just dont make gui
+        }
+
+        None
+    }
+
     fn build_file_preview(
         &mut self,
         resp: egui::Response,
         path: &String,
         offset: usize,
+        match_length: usize,
         ctx: &egui::Context,
     ) {
-        if resp.clicked() {
-            ctx.copy_text("yeet".to_string());
+        if resp.context_menu_opened() && resp.clicked_elsewhere() {
+            /*...!resp.context_menu_opened() */
+            self.table_context_menu_open = false;
         }
-        resp.on_hover_ui(|ui| {
-            let file_r = File::open(path);
-            let mut preview_buff: [u8; 64] = [0; 64]; // todo make this dynamic and nicer
-            match file_r {
-                Ok(mut file) => {
-                    let start_offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32);
-                    match file.seek(SeekFrom::Start(start_offset as u64)) {
-                        Ok(_) => match file.read(&mut preview_buff) {
-                            Ok(size) => {
-                                let hex_str = &mut self.bytes_to_hexdump(&mut preview_buff, size);
-                                ui.code_editor(hex_str);
-                            }
-                            Err(e) => {
-                                ui.code_editor(&mut e.to_string());
-                            }
-                        },
-                        Err(e) => {
-                            ui.code_editor(&mut e.to_string());
-                        } // do nothing
-                    }
+
+        if resp.secondary_clicked() || self.table_context_menu_open {
+            // TODO make this work with above hover ui
+            // TODO make this save last copy as so left-click emulates that
+            // TODO shift-click on multiple rows concats (as clicked)
+            // TODO preview of clipboard contents + current "mode"
+            // TODO add sorting of columns
+            // TODO add filtering of columns
+            // TODO add selection of rows (click, shift-click)
+            self.table_context_menu_open = true;
+
+            resp.context_menu(|ui| {
+                if ui.button("Copy as bytes").clicked() {
+                    self.table_context_menu_open = false;
+                    let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                    println!("Copying as bytes");
+                    ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
+
+                    ui.close_menu();
                 }
-                Err(_err_msg) => {} // just dont make gui
-            }
-        });
+                if ui.button("Copy as hex bytes").clicked() {
+                    self.table_context_menu_open = false;
+                    let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                    let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
+                    ctx.copy_text(hex_bytes_str.to_string());
+                    println!("Copying as hex bytes");
+
+                    ui.close_menu();
+                }
+                if ui.button("Copy as hexdump").clicked() {
+                    self.table_context_menu_open = false;
+                    let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
+                    let contents = self.get_file_contents(path, offset, 64).unwrap();
+                    let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
+                    ctx.copy_text(hex_dump_str.to_string());
+                    println!("Copying as hex dump");
+
+                    ui.close_menu();
+                }
+                if ui.button("Cancel").clicked() {
+                    self.table_context_menu_open = false;
+                    ui.close_menu();
+                }
+            });
+        } else {
+            resp.on_hover_ui(|ui| {
+                let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
+                let contents = self.get_file_contents(path, offset, 64).unwrap();
+
+                let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
+                ui.code_editor(hex_dump_str);
+            });
+        }
     }
 
     fn add_listing_and_content_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -526,7 +599,7 @@ impl QuerApp {
 
         TableBuilder::new(ui)
             .striped(true)
-            .auto_shrink(true)
+            .max_scroll_height(f32::INFINITY)
             .sense(egui::Sense {
                 click: true,
                 drag: true,
@@ -536,7 +609,7 @@ impl QuerApp {
             .column(Column::remainder().at_least(72.))
             .column(Column::remainder().at_least(64.))
             .column(Column::remainder().at_least(64.))
-            .column(Column::remainder().at_least(8.).at_most(100.))
+            .column(Column::remainder())
             .header(20.0, |mut header| {
                 header.col(|ui| {
                     ui.heading("File Path")
@@ -579,7 +652,8 @@ impl QuerApp {
                     });
                     self.respond_to_offset_cell(&resp, offset, ctx);
 
-                    let match_content = &self.findings[row_index].match_content;
+                    let match_content =
+                        self.cap_string_length(&self.findings[row_index].match_content, 1000);
                     let (_rect, resp) = row.col(|ui| {
                         let label = egui::Label::new(format!("{match_content}"))
                             .truncate()
@@ -593,7 +667,8 @@ impl QuerApp {
                         let label = egui::Label::new(format!("🔍")).truncate().selectable(false);
                         ui.add(label);
                     });
-                    self.build_file_preview(resp, &path, offset, ctx);
+                    let match_size = self.findings[row_index].match_content.len();
+                    self.build_file_preview(resp, &path, offset, match_size, ctx);
 
                     // ^^ this is the click handler
                 })
@@ -714,7 +789,7 @@ impl QuerApp {
         });
     }
 
-    fn update_main_search_ui(&mut self, _ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn update_main_search_ui(&mut self, ctx: &egui::Context) {
         // ui.with_layout(
         //     egui::Layout::centered_and_justified(egui::Direction::TopDown),
         //     |ui| {
