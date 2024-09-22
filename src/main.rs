@@ -165,7 +165,7 @@ struct QuerApp {
     filecount_handles: Vec<mpsc::Receiver<i32>>,
     file_queue: Arc<ConcurrentQueue<DirEntry>>,
     work_queue: Option<Queue<Task>>,
-    table_context_menu_open: bool,
+    clear_results_before_search: bool,
 }
 
 struct SearchOptions {
@@ -196,7 +196,7 @@ impl Clone for QuerApp {
             filecount_handles: Vec::new(),
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
-            table_context_menu_open: false,
+            clear_results_before_search: true,
         }
     }
 }
@@ -233,7 +233,7 @@ impl QuerApp {
             filecount_handles: Vec::new(),
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
-            table_context_menu_open: false,
+            clear_results_before_search: true,
         }
     }
 
@@ -392,6 +392,10 @@ impl QuerApp {
 
     fn add_advanced_view_options(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("Advanced Search", |ui| {
+            ui.checkbox(
+                &mut self.clear_results_before_search,
+                "Clear Results on New Search",
+            );
             ui.horizontal(|ui| {
                 ui.selectable_value(
                     &mut self.file_walk_options.hidden_files,
@@ -575,34 +579,25 @@ impl QuerApp {
     ) {
         resp.context_menu(|ui| {
             if ui.button("Copy as bytes").clicked() {
-                self.table_context_menu_open = false;
                 let contents = self.get_file_contents(path, offset, match_length).unwrap();
-                println!("Copying as bytes");
                 ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
 
                 ui.close_menu();
             }
             if ui.button("Copy as hex bytes").clicked() {
-                self.table_context_menu_open = false;
                 let contents = self.get_file_contents(path, offset, match_length).unwrap();
                 let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
                 ctx.copy_text(hex_bytes_str.to_string());
-                println!("Copying as hex bytes");
-
                 ui.close_menu();
             }
             if ui.button("Copy as hexdump").clicked() {
-                self.table_context_menu_open = false;
                 let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
                 let contents = self.get_file_contents(path, offset, 64).unwrap();
                 let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
                 ctx.copy_text(hex_dump_str.to_string());
-                println!("Copying as hex dump");
-
                 ui.close_menu();
             }
             if ui.button("Cancel").clicked() {
-                self.table_context_menu_open = false;
                 ui.close_menu();
             }
         });
@@ -894,6 +889,11 @@ impl QuerApp {
     }
 
     fn search(&mut self) {
+        if self.clear_results_before_search {
+            self.findings.clear();
+            self.rx_handles.clear();
+        }
+
         self.max_files = 0;
         self.current_files_mtx = Arc::new(Mutex::new(0));
 
