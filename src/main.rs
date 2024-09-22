@@ -18,6 +18,7 @@ use work_queue::{LocalQueue, Queue};
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::SeekFrom;
+use std::path::Path;
 use std::path::PathBuf;
 use std::result::Result;
 use std::string::String;
@@ -434,19 +435,67 @@ impl QuerApp {
         resp.clone().on_hover_text(cell_val);
     }
 
+    fn respond_to_filepath_cell(
+        &mut self,
+        resp: &egui::Response,
+        path_value: &String,
+        ctx: &egui::Context,
+    ) {
+        let path = Path::new(path_value);
+        let parent = path.parent().unwrap().to_str().unwrap();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        resp.context_menu(|ui| {
+            if ui.button(format!("Copy full path")).clicked() {
+                ctx.copy_text(path_value.to_string());
+                ui.close_menu();
+            }
+            if ui.button(format!("Copy filename")).clicked() {
+                ctx.copy_text(filename.to_string());
+                ui.close_menu();
+            }
+            if ui.button(format!("Copy enclosing dir")).clicked() {
+                ctx.copy_text(parent.to_string());
+                ui.close_menu();
+            }
+            if ui.button("Cancel").clicked() {
+                ui.close_menu();
+            }
+        });
+
+        resp.clone().on_hover_text(format!("{path_value}"));
+    }
+
     fn respond_to_offset_cell(
         &mut self,
         resp: &egui::Response,
         offset: usize,
         ctx: &egui::Context,
     ) {
-        let hex_value_copy = format!("0x{offset:x}");
+        let hex_value_w_0x = format!("0x{offset:x}");
         let hex_value = format!("{offset:x}");
         let dec_value = format!("{offset}");
         let hover_text = format!("Hex:\t{hex_value}\nDec:\t{dec_value}");
-        if resp.clicked() {
-            ctx.copy_text(hex_value_copy.to_string());
-        }
+
+        resp.context_menu(|ui| {
+            if ui
+                .button(format!("Copy as hex: {hex_value_w_0x}"))
+                .clicked()
+            {
+                ctx.copy_text(hex_value_w_0x.to_string());
+                ui.close_menu();
+            }
+            if ui.button(format!("Copy as hex: {hex_value}")).clicked() {
+                ctx.copy_text(hex_value.to_string());
+                ui.close_menu();
+            }
+            if ui.button(format!("Copy as decimal: {dec_value}")).clicked() {
+                ctx.copy_text(dec_value.to_string());
+                ui.close_menu();
+            }
+            if ui.button("Cancel").clicked() {
+                ui.close_menu();
+            }
+        });
 
         resp.clone().on_hover_text(hover_text);
     }
@@ -524,63 +573,47 @@ impl QuerApp {
         match_length: usize,
         ctx: &egui::Context,
     ) {
-        if resp.context_menu_opened() && resp.clicked_elsewhere() {
-            /*...!resp.context_menu_opened() */
-            self.table_context_menu_open = false;
-        }
+        resp.context_menu(|ui| {
+            if ui.button("Copy as bytes").clicked() {
+                self.table_context_menu_open = false;
+                let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                println!("Copying as bytes");
+                ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
 
-        if resp.secondary_clicked() || self.table_context_menu_open {
-            // TODO make this work with above hover ui
-            // TODO make this save last copy as so left-click emulates that
-            // TODO shift-click on multiple rows concats (as clicked)
-            // TODO preview of clipboard contents + current "mode"
-            // TODO add sorting of columns
-            // TODO add filtering of columns
-            // TODO add selection of rows (click, shift-click)
-            self.table_context_menu_open = true;
+                ui.close_menu();
+            }
+            if ui.button("Copy as hex bytes").clicked() {
+                self.table_context_menu_open = false;
+                let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
+                ctx.copy_text(hex_bytes_str.to_string());
+                println!("Copying as hex bytes");
 
-            resp.context_menu(|ui| {
-                if ui.button("Copy as bytes").clicked() {
-                    self.table_context_menu_open = false;
-                    let contents = self.get_file_contents(path, offset, match_length).unwrap();
-                    println!("Copying as bytes");
-                    ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
-
-                    ui.close_menu();
-                }
-                if ui.button("Copy as hex bytes").clicked() {
-                    self.table_context_menu_open = false;
-                    let contents = self.get_file_contents(path, offset, match_length).unwrap();
-                    let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
-                    ctx.copy_text(hex_bytes_str.to_string());
-                    println!("Copying as hex bytes");
-
-                    ui.close_menu();
-                }
-                if ui.button("Copy as hexdump").clicked() {
-                    self.table_context_menu_open = false;
-                    let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
-                    let contents = self.get_file_contents(path, offset, 64).unwrap();
-                    let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
-                    ctx.copy_text(hex_dump_str.to_string());
-                    println!("Copying as hex dump");
-
-                    ui.close_menu();
-                }
-                if ui.button("Cancel").clicked() {
-                    self.table_context_menu_open = false;
-                    ui.close_menu();
-                }
-            });
-        } else {
-            resp.on_hover_ui(|ui| {
+                ui.close_menu();
+            }
+            if ui.button("Copy as hexdump").clicked() {
+                self.table_context_menu_open = false;
                 let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
                 let contents = self.get_file_contents(path, offset, 64).unwrap();
-
                 let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
-                ui.code_editor(hex_dump_str);
-            });
-        }
+                ctx.copy_text(hex_dump_str.to_string());
+                println!("Copying as hex dump");
+
+                ui.close_menu();
+            }
+            if ui.button("Cancel").clicked() {
+                self.table_context_menu_open = false;
+                ui.close_menu();
+            }
+        });
+
+        resp.on_hover_ui(|ui| {
+            let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
+            let contents = self.get_file_contents(path, offset, 64).unwrap();
+
+            let hex_dump_str = &mut self.bytes_to_hexdump(contents.as_slice());
+            ui.code_editor(hex_dump_str);
+        });
     }
 
     fn add_listing_and_content_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -641,7 +674,7 @@ impl QuerApp {
                         ui.add(label);
                         expanding_content(ui);
                     });
-                    self.respond_to_cell(&resp, &format!("{path}"), ctx);
+                    self.respond_to_filepath_cell(&resp, &path, ctx);
 
                     let offset = self.findings[row_index].offset;
                     let (_rect, resp) = row.col(|ui| {
