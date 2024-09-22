@@ -997,7 +997,7 @@ impl QuerApp {
                 });
                 ui.menu_button("About", |ui| {
                     ui.vertical(|ui| {
-                        ui.label("quer - A file finding utility");
+                        ui.label("quer - A data finding utility");
                         ui.separator();
                         ui.hyperlink_to("Source Code", "https://github.com/TJ9867/quer");
                     });

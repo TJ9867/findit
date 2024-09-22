@@ -3,7 +3,22 @@
      style="display:block;float:none;margin-left:auto;margin-right:auto;width:50%">
 
 
-A super simple `egui` utility application written in Rust.
+A simple data finder application, written in Rust.
+
+## Overview of Features
+- Quick, multithreaded search
+- Search for arbitrary regex supported by the `regex` crate
+- Search for a wide variety hex patterns supported by the `regex` crate (WIP)
+- Restrict search to only matches at a specific alignment
+- Append results of multiple searches (configurable)
+- Export results for a given file to an ImHex bookmarks file (aka `.imhexbm`)
+- Export results to CSV (TODO)
+- Preview file contents at the match
+- Stable sorting of arbitrary columns
+- Copy almost any value in almost any format
+- Restrict search to X number of hits per file (configurable)
+- Restrict search of hidden files (configurable)
+- Memory of previous search regices
 
 ## Usage
 On your favored platform:
