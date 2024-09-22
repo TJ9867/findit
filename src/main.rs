@@ -13,8 +13,12 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use json;
+
 use work_queue::{LocalQueue, Queue};
 
+use std::collections::VecDeque;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::SeekFrom;
@@ -128,6 +132,12 @@ enum LinkBehaviorEnum {
     NoFollow,
 }
 
+#[derive(PartialEq, Clone)]
+enum RegexErr {
+    InvalidChar,
+    EmptyRegex,
+}
+
 #[derive(Clone)]
 struct FileWalkOptions {
     hidden_files: FilterTypeEnum,
@@ -139,17 +149,21 @@ struct FileCount {
     num_dirs: i32,
 }
 
-#[derive(PartialEq, Clone)]
-enum RegexErr {
-    InvalidChar,
-    EmptyRegex,
+struct Finding {
+    filepath: String,
+    offset: usize,
+    match_size: usize,
+    match_content: String,
 }
 
 struct QuerApp {
     regex_str: String,
     filter_str: String,
     root_folder_path: PathBuf,
-    open_file_dialog: Option<FileDialog>,
+    export_file_path: PathBuf,
+    imhex_file_path: String,
+    search_dir_dialog: Option<FileDialog>,
+    export_file_dialog: Option<FileDialog>,
     content_type: ContentEnum,
     regex_result: Result<RegexEnum, String>,
     file_walk_options: FileWalkOptions,
@@ -166,6 +180,8 @@ struct QuerApp {
     file_queue: Arc<ConcurrentQueue<DirEntry>>,
     work_queue: Option<Queue<Task>>,
     clear_results_before_search: bool,
+    previous_searches: VecDeque<(String, ContentEnum)>,
+    log_lines: Vec<String>,
 }
 
 struct SearchOptions {
@@ -180,7 +196,10 @@ impl Clone for QuerApp {
             regex_str: self.regex_str.clone(),
             filter_str: self.filter_str.clone(),
             root_folder_path: self.root_folder_path.clone(),
-            open_file_dialog: None, // this is why we're clonin'
+            export_file_path: self.export_file_path.clone(),
+            imhex_file_path: self.imhex_file_path.clone(),
+            search_dir_dialog: None,  // this is why we're clonin'
+            export_file_dialog: None, // this is why we're clonin'
             content_type: self.content_type.clone(),
             regex_result: self.regex_result.clone(),
             file_walk_options: self.file_walk_options.clone(),
@@ -197,6 +216,8 @@ impl Clone for QuerApp {
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
             clear_results_before_search: true,
+            previous_searches: VecDeque::new(),
+            log_lines: Vec::new(),
         }
     }
 }
@@ -214,7 +235,10 @@ impl QuerApp {
             regex_str: "".to_owned(),
             filter_str: "".to_owned(),
             root_folder_path: PathBuf::from("/"),
-            open_file_dialog: Option::None,
+            export_file_path: PathBuf::from("/"),
+            imhex_file_path: "".to_owned(),
+            search_dir_dialog: Option::None,
+            export_file_dialog: Option::None,
             content_type: ContentEnum::Hex,
             regex_result: Ok(RegexEnum::Hex(BytesRegex::new("").unwrap())),
             file_walk_options: FileWalkOptions {
@@ -234,6 +258,61 @@ impl QuerApp {
             file_queue: Arc::new(ConcurrentQueue::unbounded()),
             work_queue: None,
             clear_results_before_search: true,
+            previous_searches: VecDeque::new(),
+            log_lines: Vec::new(),
+        }
+    }
+
+    fn add_export_file_dialog(&mut self, ctx: &egui::Context) {
+        let mut should_close_dialog = false;
+        if let Some(dialog) = &mut self.export_file_dialog {
+            let viewport_id = egui::ViewportId::from_hash_of(format!("file_dialog"));
+            let viewport_builder = egui::ViewportBuilder::default()
+                .with_inner_size((800.0 + 10., 600.0 + 50.))
+                .with_resizable(false)
+                .with_title(format!("Export File To"))
+                .with_decorations(true);
+
+            let viewport_cb = |ctx: &egui::Context, _| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.with_layout(
+                        egui::Layout::left_to_right(egui::Align::Center).with_main_justify(true),
+                        |_ui| {
+                            dialog.update(ctx);
+                        },
+                    );
+                });
+
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    should_close_dialog = true;
+                }
+            };
+
+            ctx.show_viewport_immediate(viewport_id, viewport_builder, viewport_cb);
+            if let Some(file) = dialog.take_selected() {
+                self.export_file_path = file.to_path_buf();
+                Self::export_findings_to_imhexbm(
+                    &self.findings,
+                    &self.export_file_path,
+                    &self.imhex_file_path,
+                );
+            }
+
+            match dialog.state() {
+                DialogState::Open => {}
+                DialogState::Closed => {
+                    self.export_file_dialog = None;
+                }
+                DialogState::Selected(_) => {} // TODO use this in a nicer fashion than rebuilding gui element
+                DialogState::SelectedMultiple(_) => {}
+                DialogState::Cancelled => {
+                    self.export_file_dialog = None;
+                }
+            }
+
+            if should_close_dialog {
+                self.export_file_dialog = None;
+            }
         }
     }
 
@@ -263,15 +342,15 @@ impl QuerApp {
                     .resizable(false)
                     .min_size([800., 600.]); //.show_files_filter(filter);
                 dialog.select_directory();
-                self.open_file_dialog = Some(dialog);
+                self.search_dir_dialog = Some(dialog);
             }
 
             let mut should_close_dialog = false;
-            if let Some(dialog) = &mut self.open_file_dialog {
+            if let Some(dialog) = &mut self.search_dir_dialog {
                 // dialog.update(ctx);
                 // if let Some(file) = dialog.take_selected() {
                 //     self.root_folder_path = file.to_path_buf();
-                //     self.open_file_dialog = None;
+                //     self.search_dir_dialog = None;
                 // }
                 let viewport_id = egui::ViewportId::from_hash_of(format!("folder_dialog"));
                 let viewport_builder = egui::ViewportBuilder::default()
@@ -304,17 +383,17 @@ impl QuerApp {
                 match dialog.state() {
                     DialogState::Open => {}
                     DialogState::Closed => {
-                        self.open_file_dialog = None;
+                        self.search_dir_dialog = None;
                     }
                     DialogState::Selected(_) => {} // TODO use this in a nicer fashion than rebuilding gui element
                     DialogState::SelectedMultiple(_) => {}
                     DialogState::Cancelled => {
-                        self.open_file_dialog = None;
+                        self.search_dir_dialog = None;
                     }
                 }
 
                 if should_close_dialog {
-                    self.open_file_dialog = None;
+                    self.search_dir_dialog = None;
                 }
             }
         });
@@ -332,12 +411,20 @@ impl QuerApp {
         // update regex
         match self.content_type {
             ContentEnum::Hex => {
-                let mut unicode_off_re = String::from("(?-u)"); // append unicode disable so even non-utf8 stuff matches
+                let mut unicode_off_re_str = String::from("(?-u)"); // append unicode disable so even non-utf8 stuff matches
                 match convert_simplified_hex_regex(&self.regex_str) {
                     Ok(r) => {
-                        unicode_off_re.push_str(&r);
-                        let re = BytesRegex::new(&unicode_off_re).unwrap();
-                        self.regex_result = Ok(RegexEnum::Hex(re));
+                        unicode_off_re_str.push_str(&r);
+
+                        match BytesRegex::new(&unicode_off_re_str) {
+                            Ok(unicode_off_re) => {
+                                self.regex_result = Ok(RegexEnum::Hex(unicode_off_re));
+                            }
+                            Err(re_error) => {
+                                self.regex_result =
+                                    Err(format!("Error compiling regex: {}", re_error).to_string());
+                            }
+                        }
                     }
                     Err(err) => match err {
                         RegexErr::InvalidChar => {
@@ -412,10 +499,10 @@ impl QuerApp {
             ui.horizontal(|ui| {
                 let _max_hits_label =
                     ui.label(RichText::new("Max Hits (per File): ").text_style(TextStyle::Small));
-                ui.add(egui::widgets::DragValue::new(&mut self.max_hits));
-                if self.max_hits < 1 {
-                    self.max_hits = 1;
-                }
+                ui.add(
+                    egui::widgets::Slider::new(&mut self.max_hits, 1_u32..=2_u32.pow(20))
+                        .logarithmic(true),
+                );
             });
             if self.content_type == ContentEnum::Hex {
                 ui.horizontal(|ui| {
@@ -431,11 +518,22 @@ impl QuerApp {
         });
     }
 
-    fn respond_to_cell(&mut self, resp: &egui::Response, cell_val: &String, ctx: &egui::Context) {
-        if resp.clicked() {
-            ctx.copy_text(cell_val.to_string());
-        }
-
+    fn respond_to_match_cell(&mut self, resp: &egui::Response, cell_val: &String) {
+        resp.context_menu(|ui| {
+            if ui.button(format!("Sort ascending")).clicked() {
+                self.findings
+                    .sort_by(|a, b| a.match_content.cmp(&b.match_content));
+                ui.close_menu();
+            }
+            if ui.button(format!("Sort descending")).clicked() {
+                self.findings
+                    .sort_by(|a, b| b.match_content.cmp(&a.match_content));
+                ui.close_menu();
+            }
+            if ui.button(format!("Cancel")).clicked() {
+                ui.close_menu();
+            }
+        });
         resp.clone().on_hover_text(cell_val);
     }
 
@@ -461,6 +559,37 @@ impl QuerApp {
                 ctx.copy_text(parent.to_string());
                 ui.close_menu();
             }
+            ui.separator();
+            if ui.button(format!("Sort ascending")).clicked() {
+                self.findings.sort_by(|a, b| a.filepath.cmp(&b.filepath));
+                ui.close_menu();
+            }
+            if ui.button(format!("Sort descending")).clicked() {
+                self.findings.sort_by(|a, b| b.filepath.cmp(&a.filepath));
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui
+                .button(format!("Export File results to .imhexbm..."))
+                .clicked()
+            {
+                ui.close_menu();
+
+                self.log(format!("Exporting {} to imhexbm", path_value));
+
+                let mut dialog = FileDialog::new()
+                    .initial_directory(self.export_file_path.clone())
+                    .as_modal(false)
+                    .title_bar(false)
+                    .movable(false)
+                    .resizable(false)
+                    .min_size([800., 600.]); //.show_files_filter(filter);
+                dialog.save_file();
+                self.export_file_dialog = Some(dialog);
+                self.imhex_file_path = path_value.clone();
+            }
+
+            ui.separator();
             if ui.button("Cancel").clicked() {
                 ui.close_menu();
             }
@@ -494,6 +623,15 @@ impl QuerApp {
             }
             if ui.button(format!("Copy as decimal: {dec_value}")).clicked() {
                 ctx.copy_text(dec_value.to_string());
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui.button(format!("Sort ascending")).clicked() {
+                self.findings.sort_by(|a, b| a.offset.cmp(&b.offset));
+                ui.close_menu();
+            }
+            if ui.button(format!("Sort descending")).clicked() {
+                self.findings.sort_by(|a, b| b.offset.cmp(&a.offset));
                 ui.close_menu();
             }
             if ui.button("Cancel").clicked() {
@@ -625,6 +763,8 @@ impl QuerApp {
             }
         }
 
+        ui.separator();
+
         TableBuilder::new(ui)
             .striped(true)
             .max_scroll_height(f32::INFINITY)
@@ -640,19 +780,26 @@ impl QuerApp {
             .column(Column::remainder())
             .header(20.0, |mut header| {
                 header.col(|ui| {
-                    ui.heading("File Path")
-                        .on_hover_text("File path to the file that a given match was found in.");
+                    ui.horizontal(|ui| {
+                        ui.heading("File Path").on_hover_text(
+                            "File path to the file that a given match was found in.",
+                        );
+                    });
+                    ui.separator();
                 });
                 header.col(|ui| {
-                    ui.heading("Offset")
-                        .on_hover_text("Offset into the file that the match starts at.");
+                    let resp = ui.heading("Offset");
+                    resp.on_hover_text("Offset into the file that the match starts at.");
+                    ui.separator();
                 });
                 header.col(|ui| {
                     ui.heading("Match")
                         .on_hover_text("Contents of the resulting match");
+                    ui.separator();
                 });
                 header.col(|ui| {
                     ui.heading("Preview").on_hover_text("Visualize column");
+                    ui.separator();
                 });
             })
             .body(|body| {
@@ -689,13 +836,13 @@ impl QuerApp {
                         ui.add(label);
                     });
 
-                    self.respond_to_cell(&resp, &format!("{match_content}"), ctx);
+                    self.respond_to_match_cell(&resp, &format!("{match_content}"));
 
                     let (_rect, resp) = row.col(|ui| {
                         let label = egui::Label::new(format!("🔍")).truncate().selectable(false);
                         ui.add(label);
                     });
-                    let match_size = self.findings[row_index].match_content.len();
+                    let match_size = self.findings[row_index].match_size;
                     self.build_file_preview(resp, &path, offset, match_size, ctx);
 
                     // ^^ this is the click handler
@@ -705,15 +852,34 @@ impl QuerApp {
 
     fn add_regex_line(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         ui.horizontal(|ui| {
-            let regex_edit = egui::TextEdit::singleline(&mut self.regex_str)
-                .hint_text("Enter regex here")
-                .font(TextStyle::Small);
-            let regex_resp = ui
-                .add_sized([ui.available_width(), 12.0], regex_edit)
-                .highlight();
-            regex_resp.on_hover_text(
-                "Examples: abc.ef, ^hello world$, aa{3}h. See mode tooltips for more info.",
-            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button("v", |ui| {
+                    if self.previous_searches.len() > 0 {
+                        for (prev_search, content_type) in self.previous_searches.iter() {
+                            if ui.button(prev_search).clicked() {
+                                self.regex_str = prev_search.clone();
+                                self.content_type = content_type.clone();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Clear").clicked() {
+                            self.previous_searches.clear();
+                            ui.close_menu();
+                        }
+                    } else {
+                        ui.label("No previous searches yet");
+                    }
+                })
+                .response
+                .on_hover_text("Past searches");
+                let regex_edit = egui::TextEdit::singleline(&mut self.regex_str)
+                    .hint_text("Enter regex here")
+                    .font(TextStyle::Small);
+
+                ui.add_sized(ui.available_size(), regex_edit).on_hover_text(
+                    "Examples: abc.ef, ^hello world$, aa{3}h. See mode tooltips for more info.",
+                );
+            });
         });
     }
 
@@ -818,17 +984,27 @@ impl QuerApp {
     }
 
     fn update_main_search_ui(&mut self, ctx: &egui::Context) {
-        // ui.with_layout(
-        //     egui::Layout::centered_and_justified(egui::Direction::TopDown),
-        //     |ui| {
-        //         egui::Grid::new("search_ui_id").show(ui, |ui| {
-        //
-        //         });
-        //     },
-        // );
-
         // Top, search + options
         egui::TopBottomPanel::top("search_options").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    ui.menu_button("Export", |ui| {
+                        if ui.button("Export to CSV...").clicked() {
+                            self.log("*clack* (TODO)".to_string());
+                            ui.close_menu();
+                        }
+                    });
+                });
+                ui.menu_button("About", |ui| {
+                    ui.vertical(|ui| {
+                        ui.label("quer - A file finding utility");
+                        ui.separator();
+                        ui.hyperlink_to("Source Code", "https://github.com/TJ9867/quer");
+                    });
+                });
+            });
+            self.add_export_file_dialog(ctx);
+
             self.add_regex_line(ui, ctx);
             self.add_regex_error_line(ui);
             self.add_folder_dialog(ui, ctx);
@@ -841,6 +1017,30 @@ impl QuerApp {
         egui::TopBottomPanel::bottom("search_progress").show(ctx, |ui| {
             let progress = egui::widgets::ProgressBar::new(self.progress);
             ui.add(progress);
+            ui.separator();
+
+            let text_style = TextStyle::Body;
+            let row_height = ui.text_style_height(&text_style);
+
+            egui::Frame::none()
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink(false).show_rows(
+                        ui,
+                        row_height,
+                        self.log_lines.len(),
+                        |ui, row_range| {
+                            for row in row_range {
+                                ui.label(&self.log_lines[row]);
+                            }
+                        },
+                    )
+                })
+                .response
+                .context_menu(|ui| {
+                    if ui.button("Clear Logs").clicked() {
+                        self.log_lines.clear();
+                    }
+                });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -888,11 +1088,56 @@ impl QuerApp {
         }
     }
 
+    fn export_findings_to_imhexbm(
+        findings: &Vec<Finding>,
+        output_path: &PathBuf,
+        filepath: &String,
+    ) {
+        let mut bookmarks_vec: Vec<json::JsonValue> = Vec::new();
+        let mut json_data = json::JsonValue::new_object();
+
+        let mut id: u32 = 1;
+        for finding in findings.iter() {
+            if *filepath == finding.filepath {
+                let mut bookmark_obj = json::JsonValue::new_object();
+                bookmark_obj["color"] = 1341756994.into();
+                bookmark_obj["comment"] = "\n".into();
+                bookmark_obj["id"] = id.into();
+                bookmark_obj["locked"] = true.into();
+                bookmark_obj["name"] =
+                    format!("{} @ 0x{:x}", finding.match_content, finding.offset).into();
+
+                let mut region_obj = json::JsonValue::new_object();
+                region_obj["address"] = finding.offset.into();
+                region_obj["size"] = finding.match_size.into();
+                bookmark_obj["region"] = region_obj;
+
+                bookmarks_vec.push(bookmark_obj);
+
+                id += 1;
+            }
+        }
+        json_data["bookmarks"] = bookmarks_vec.into();
+
+        match fs::write(output_path, json::stringify_pretty(json_data, 4)) {
+            Ok(_ok) => {}
+            Err(_err) => {}
+        }
+    }
+
     fn search(&mut self) {
         if self.clear_results_before_search {
             self.findings.clear();
             self.rx_handles.clear();
         }
+
+        if self.previous_searches.len() == 10 {
+            // TODO make configurable
+            self.previous_searches.pop_back();
+        }
+
+        self.previous_searches
+            .push_front((self.regex_str.clone(), self.content_type.clone()));
 
         self.max_files = 0;
         self.current_files_mtx = Arc::new(Mutex::new(0));
@@ -902,19 +1147,22 @@ impl QuerApp {
             self.file_walk_options.clone(),
         );
 
-        println!(
-            "Searching for {} in {}",
-            self.regex_str,
-            self.root_folder_path.to_str().unwrap()
+        self.log(
+            format!(
+                "Searching for {} in {}",
+                self.regex_str,
+                self.root_folder_path.to_str().unwrap()
+            )
+            .to_string(),
         );
 
         let count_struct = self.enqueue_files(filtered_iter);
 
         self.max_files = /*count_struct.num_dirs +*/ count_struct.num_files;
-        println!(
+        self.log(format!(
             "Searching {} files, {} directories",
             count_struct.num_dirs, count_struct.num_files
-        );
+        ));
 
         if self.max_files < 1 {
             return;
@@ -994,6 +1242,12 @@ impl QuerApp {
             }
         }
     }
+
+    fn log(&mut self, s: String) {
+        let date = chrono::Local::now();
+        self.log_lines
+            .push(format!("{} {}", date.format("[%Y-%m-%d][%H:%M:%S]"), s));
+    }
 }
 
 fn search_file(entry: &DirEntry, tx: &mpsc::Sender<Finding>, search_opts: Arc<SearchOptions>) {
@@ -1054,6 +1308,7 @@ fn process_binary_match(
     match tx.send(Finding {
         filepath: String::from(entry.path().to_str().unwrap()),
         offset: m.start(),
+        match_size: m.len(),
         match_content: m
             .as_bytes()
             .iter()
@@ -1075,6 +1330,7 @@ fn process_text_match(
     match tx.send(Finding {
         filepath: String::from(entry.path().to_str().unwrap()),
         offset: m.start(),
+        match_size: m.len(),
         match_content: String::from_utf8_lossy(m.as_bytes()).to_string(),
     }) {
         Ok(_) => {}
@@ -1098,15 +1354,9 @@ fn create_filter_iter(
         });
 }
 
-struct Finding {
-    filepath: String,
-    offset: usize,
-    match_content: String,
-}
-
 fn convert_simplified_hex_regex(regex_str: &String) -> Result<String, RegexErr> {
     let no_spaces = regex_str.replace(" ", "");
-    let invalid_char_re = Utf8Regex::new("[^a-fA-F0-9.?]").unwrap();
+    let invalid_char_re = Utf8Regex::new("[^a-fA-F0-9.?\\[\\]\\{\\}\\(\\)\\|,-]").unwrap();
     if let Some(_) = invalid_char_re.find(&no_spaces) {
         // found an invalid character
         return Err(RegexErr::InvalidChar);
