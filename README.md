@@ -28,7 +28,7 @@ cd quer
 cargo run
 ```
 
-![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/main_gui.png)
+![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/refs/heads/main/rsrc/main_gui.png)
 ---
 ## Demo
 ![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/example_usage.gif)
