@@ -518,8 +518,51 @@ impl QuerApp {
         });
     }
 
-    fn respond_to_match_cell(&mut self, resp: &egui::Response, cell_val: &String) {
+    fn get_file_contents(
+        &self,
+        path: &String,
+        offset: usize,
+        match_length: usize,
+    ) -> Option<Vec<u8>> {
+        let file_r = File::open(path);
+        let mut preview_buff = vec![0; match_length]; // todo make this dynamic and nicer
+        match file_r {
+            Ok(mut file) => {
+                match file.seek(SeekFrom::Start(offset as u64)) {
+                    Ok(_) => match file.read(&mut preview_buff) {
+                        Ok(_size) => return Some(preview_buff),
+                        Err(_e) => {}
+                    },
+                    Err(_e) => {} // do nothing
+                }
+            }
+            Err(_e) => {} // just dont make gui
+        }
+
+        None
+    }
+
+    fn respond_to_match_cell(
+        &mut self,
+        resp: &egui::Response,
+        path: &String,
+        offset: usize,
+        match_length: usize,
+        cell_val: &String,
+        ctx: &egui::Context,
+    ) {
         resp.context_menu(|ui| {
+            if ui.button("Copy as bytes").clicked() {
+                let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
+                ui.close_menu();
+            }
+            if ui.button("Copy as hex bytes").clicked() {
+                let contents = self.get_file_contents(path, offset, match_length).unwrap();
+                let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
+                ctx.copy_text(hex_bytes_str.to_string());
+                ui.close_menu();
+            }
             if ui.button(format!("Sort ascending")).clicked() {
                 self.findings
                     .sort_by(|a, b| a.match_content.cmp(&b.match_content));
@@ -683,51 +726,15 @@ impl QuerApp {
         }
     }
 
-    fn get_file_contents(
-        &self,
-        path: &String,
-        offset: usize,
-        match_length: usize,
-    ) -> Option<Vec<u8>> {
-        let file_r = File::open(path);
-        let mut preview_buff = vec![0; match_length]; // todo make this dynamic and nicer
-        match file_r {
-            Ok(mut file) => {
-                match file.seek(SeekFrom::Start(offset as u64)) {
-                    Ok(_) => match file.read(&mut preview_buff) {
-                        Ok(_size) => return Some(preview_buff),
-                        Err(_e) => {}
-                    },
-                    Err(_e) => {} // do nothing
-                }
-            }
-            Err(_e) => {} // just dont make gui
-        }
-
-        None
-    }
-
-    fn build_file_preview(
+    fn response_to_hex_preview(
         &mut self,
         resp: egui::Response,
         path: &String,
         offset: usize,
-        match_length: usize,
+        _match_length: usize,
         ctx: &egui::Context,
     ) {
         resp.context_menu(|ui| {
-            if ui.button("Copy as bytes").clicked() {
-                let contents = self.get_file_contents(path, offset, match_length).unwrap();
-                ctx.copy_text(String::from_utf8_lossy(contents.as_slice()).to_string());
-
-                ui.close_menu();
-            }
-            if ui.button("Copy as hex bytes").clicked() {
-                let contents = self.get_file_contents(path, offset, match_length).unwrap();
-                let hex_bytes_str = &mut self.bytes_to_hex(contents.as_slice(), match_length);
-                ctx.copy_text(hex_bytes_str.to_string());
-                ui.close_menu();
-            }
             if ui.button("Copy as hexdump").clicked() {
                 let offset = std::cmp::max::<i64>(0 as i64, offset as i64 - 32) as usize;
                 let contents = self.get_file_contents(path, offset, 64).unwrap();
@@ -836,14 +843,22 @@ impl QuerApp {
                         ui.add(label);
                     });
 
-                    self.respond_to_match_cell(&resp, &format!("{match_content}"));
+                    let match_size = self.findings[row_index].match_size;
+                    self.respond_to_match_cell(
+                        &resp,
+                        &path,
+                        offset,
+                        match_size,
+                        &format!("{match_content}"),
+                        ctx,
+                    );
 
                     let (_rect, resp) = row.col(|ui| {
                         let label = egui::Label::new(format!("🔍")).truncate().selectable(false);
                         ui.add(label);
                     });
-                    let match_size = self.findings[row_index].match_size;
-                    self.build_file_preview(resp, &path, offset, match_size, ctx);
+
+                    self.response_to_hex_preview(resp, &path, offset, match_size, ctx);
 
                     // ^^ this is the click handler
                 })
@@ -1039,6 +1054,7 @@ impl QuerApp {
                 .context_menu(|ui| {
                     if ui.button("Clear Logs").clicked() {
                         self.log_lines.clear();
+                        ui.close_menu();
                     }
                 });
         });
