@@ -1,7 +1,6 @@
 # quer
-<img src="https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/icon/quer-icon-512x512.png"
-     style="display:block;float:none;margin-left:auto;margin-right:auto;width:50%">
 
+![quer icon](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/icon/quer-icon-512x512.png)
 
 A simple data finder application, written in Rust.
 
@@ -31,7 +30,8 @@ cargo run
 ![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/refs/heads/main/rsrc/main_gui.png)
 ---
 ## Demo
-![main quer GUI](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/example_usage.gif)
+
+![main quer GUI example](https://raw.githubusercontent.com/TJ9867/quer/main/rsrc/example_usage.gif)
 ---
 
 ## Explanation
